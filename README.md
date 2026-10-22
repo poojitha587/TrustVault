@@ -5,9 +5,9 @@ A secure document-sharing web application with tamper-proof audit logging for Sn
 A secure document sharing platform with strict server-side authorization, real-time permission revocation, and immutable audit trails.
 
 ## Live Deployment
-- **Live API URL:** https://trustvault-4bgd.onrender.com
-- **API Docs:** https://trustvault-4bgd.onrender.com/docs
-
+- **API Interactive Docs (Use this link):** https://trustvault-4bgd.onrender.com/docs
+- **Base API URL:** https://trustvault-4bgd.onrender.com
+ 
 ## Default Demo Credentials
 - **Administrator:** `admin@trustvault.com` / `AdminPass123!`
 - **Document Owner:** `owner@trustvault.com` / `OwnerPass123!`
