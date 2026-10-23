@@ -65,25 +65,30 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(
     title="TrustVault API",
     description="Secure document sharing platform with strict server-side authorization and audit trail.",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 UPLOAD_DIR = "uploaded_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Mount static folder
+# Mount static folder and handle frontend root route safely
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
-STATIC_INDEX = STATIC_DIR / "index.html"
 
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/", include_in_schema=False)
 def serve_frontend():
-    if STATIC_INDEX.exists():
-        return FileResponse(str(STATIC_INDEX))
+    index_file = STATIC_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(str(index_file), media_type="text/html")
+    alt_index = Path("static/index.html")
+    if alt_index.exists():
+        return FileResponse(str(alt_index), media_type="text/html")
     return {"message": "TrustVault API is running. Check /docs"}
 
 
