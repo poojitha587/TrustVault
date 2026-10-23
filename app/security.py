@@ -1,70 +1,62 @@
-from fastapi import Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordBearer
+from datetime import datetime, timedelta
+from typing import Optional
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 from sqlalchemy.orm import Session
-import jwt
+from app.models import DocumentPermission, AuditLog, Document
 
-from .database import get_db
-from .models import User, Document, DocumentPermission, AuditLog
-from .auth import SECRET_KEY, ALGORITHM
+# Password hashing setup
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+# JWT security configurations
+SECRET_KEY = "trustvault-super-secure-secret-key-change-in-production"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def decode_access_token(token: str) -> Optional[dict]:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        return payload
+    except JWTError:
+        return None
+
+def authorize_document_access(db: Session, user, document: Document, action: str = "READ") -> bool:
+    # 1. Administrators and Document Owners always have full access
+    if user.role == "Administrator" or document.owner_id == user.id:
+        return True
     
-    user = db.query(User).filter(User.email == email).first()
-    if user is None:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
-
-def authorize_document_access(
-    document_id: str,
-    required_permission: str,
-    request: Request,
-    user: User,
-    db: Session
-):
-    doc = db.query(Document).filter(Document.id == document_id).first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    # If owner, full access granted
-    if doc.owner_id == user.id:
-        return doc
-
-    # Check live permissions in database (Guarantees instant revocation)
-    perm = db.query(DocumentPermission).filter(
-        DocumentPermission.document_id == document_id,
+    # 2. Strict Server-Side Live DB Permission Check for Viewers/Others
+    permission = db.query(DocumentPermission).filter(
+        DocumentPermission.document_id == document.id,
         DocumentPermission.user_id == user.id
     ).first()
 
-    has_access = False
-    if perm:
-        if required_permission == "READ":
-            has_access = True
-        elif required_permission == "EDIT" and perm.permission == "EDIT":
-            has_access = True
+    if permission and permission.permission in [action, "EDIT"]:
+        return True
+    
+    return False
 
-    if not has_access:
-        # Non-negotiable: Log unauthorized attempt in AuditLog
-        audit = AuditLog(
-            user_id=user.id,
-            document_id=document_id,
-            action="UNAUTHORIZED_ATTEMPT",
-            status="DENIED",
-            ip_address=request.client.host if request.client else "unknown"
-        )
-        db.add(audit)
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden: You do not have permission to access this document."
-        )
-
-    return doc
+def record_audit_log(db: Session, user_id: Optional[str], action: str, document_id: Optional[str], status: str, ip_address: Optional[str] = None):
+    log_entry = AuditLog(
+        user_id=user_id,
+        action=action,
+        document_id=document_id,
+        status=status,
+        ip_address=ip_address,
+        timestamp=datetime.utcnow()
+    )
+    db.add(log_entry)
+    db.commit()
