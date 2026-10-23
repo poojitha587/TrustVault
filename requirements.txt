@@ -1,10 +1,8 @@
 fastapi
-uvicorn[standard]
+uvicorn
 sqlalchemy
 pydantic
+passlib
+bcrypt
 python-multipart
-passlib[bcrypt]
-bcrypt==4.0.1
-pyjwt
-pytest
-httpx
+python-jose[cryptography]
