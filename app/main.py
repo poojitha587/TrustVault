@@ -3,6 +3,7 @@ import shutil
 import uuid
 from datetime import datetime
 from typing import List, Optional
+from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -22,7 +23,7 @@ from app.security import (
     record_audit_log,
 )
 
-# ---------------- Embedded Schemas (No external schemas.py needed) ----------------
+# ---------------- Schemas ----------------
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -67,19 +68,23 @@ app = FastAPI(
     version="1.0.0"
 )
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 UPLOAD_DIR = "uploaded_files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Mount static folder for frontend dashboard UI
-if os.path.exists("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+# Mount static folder
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = BASE_DIR / "static"
+STATIC_INDEX = STATIC_DIR / "index.html"
+
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.get("/", include_in_schema=False)
 def serve_frontend():
-    if os.path.exists("static/index.html"):
-        return FileResponse("static/index.html")
-    return {"message": "TrustVault API is running. Visit /docs for interactive documentation."}
+    if STATIC_INDEX.exists():
+        return FileResponse(str(STATIC_INDEX))
+    return {"message": "TrustVault API is running. Check /docs"}
 
 
 # ---------------- Seed Initial Users ----------------
@@ -117,7 +122,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 
-# ---------------- Endpoints ----------------
+# ---------------- Auth Endpoints (/token and /auth/login) ----------------
+@app.post("/token", response_model=Token, summary="OAuth2 Token endpoint")
 @app.post("/auth/login", response_model=Token, summary="Authenticate user")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
@@ -131,6 +137,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     return {"access_token": access_token, "token_type": "bearer", "role": user.role}
 
 
+# ---------------- Document Management ----------------
 @app.post("/documents/upload", summary="Upload a secure document")
 def upload_document(
     request: Request,
