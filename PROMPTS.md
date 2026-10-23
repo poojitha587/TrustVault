@@ -1,36 +1,50 @@
-# Prompts & AI Usage Log (TrustVault)
+# PROMPTS.md — AI Interaction & Oversight Log
 
-## Entry 1: Database Schema Design & SQLAlchemy Models
+This log documents interactions with AI tools during the development of TrustVault, highlighting supervision, critical architectural decisions, and error corrections in authorization and audit logic.
+
+- **GitHub Repository:** [https://github.com/poojitha587/TrustVault.git](https://github.com/poojitha587/TrustVault.git)
+
+---
+
+### Entry 1: Initial Data Modeling & Entity Design
 - **Date:** October 19, 2026
-- **Prompt:** "Write SQLAlchemy models for a secure document vault app in FastAPI including User, Document, DocumentPermission, and AuditLog with UUID primary keys and foreign key constraints."
-- **What it produced:** Generated standard SQLAlchemy ORM models with proper relationships and foreign keys.
-- **What was wrong with it:** It used standard auto-incrementing integer IDs which are vulnerable to enumeration attacks (IDOR).
-- **What I did instead:** Modified the models to use UUIDs (`uuid.uuid4()`) for all primary keys to prevent sequential ID guessing.
+- **Prompt:** "Generate SQLAlchemy models for TrustVault covering users, documents, permissions, and audit logs with role support."
+- **AI Output:** Provided basic models but used simple integer IDs and omitted tracking failed access attempts in the audit trail.
+- **Flaw Detected:** Sequential integer IDs facilitate enumeration attacks (IDOR). Audit logs only considered successful operations.
+- **Correction Applied:** Replaced integer primary keys with `uuid.uuid4()` strings. Added `status` ("SUCCESS", "DENIED") and `ip_address` attributes to `AuditLog`.
 
-## Entry 2: Authorization Middleware & Real-Time Permission Checks (Critical)
+---
+
+### Entry 2: Download Authorization Flaw Detection (Critical)
 - **Date:** October 20, 2026
-- **Prompt:** "Write a FastAPI dependency function that checks if a user has read or edit permission on a document before allowing download."
-- **What it produced:** An initial function that checked role claims directly from the decoded JWT token payload.
-- **What was wrong with it:** Relying on JWT claims for permissions fails Rule #3 of the challenge—if an admin revokes access, the existing token would still let the user download the file until it expired.
-- **What I did instead:** Completely rewrote `authorize_document_access` in `app/security.py` to query the live `document_permissions` table on every single request, guaranteeing instant permission revocation.
+- **Prompt:** "Write a FastAPI route to download documents with role-based access control."
+- **AI Output:** The model generated a check using `if current_user.role in ["Administrator", "Owner"]` and allowed owners to download any document across the system.
+- **Flaw Detected:** Severe authorization bypass: any user with the "Owner" role could download files owned by *other* owners.
+- **Correction Applied:** Enforced strict ownership validation (`document.owner_id == user.id`) and queried `DocumentPermission` records specifically for the target document ID.
 
-## Entry 3: Audit Logging for Unauthorized Attempts
-- **Date:** October 20, 2026
-- **Prompt:** "How should I log unauthorized file download attempts in FastAPI and SQLAlchemy?"
-- **What it produced:** Suggested printing to console or writing to an external text log file.
-- **What was wrong with it:** Text log files can be easily tampered with or deleted, violating the evidence requirement of the audit trail.
-- **What I did instead:** Created a persistent `AuditLog` database model that records user_id, document_id, action (`UNAUTHORIZED_ATTEMPT`), status (`DENIED`), and IP address directly into `trustvault.db`.
+---
 
-## Entry 4: Secure File Upload and Path Traversal Prevention
+### Entry 3: Stale Permissions & JWT Revocation Logic (Critical)
 - **Date:** October 21, 2026
-- **Prompt:** "Write a FastAPI endpoint to handle file uploads and save them in a local storage directory."
-- **What it produced:** Used `file.filename` directly to save the uploaded file on disk.
-- **What was wrong with it:** Direct use of user-supplied filenames allows path traversal attacks (e.g., `../../etc/passwd` or overwriting critical system files).
-- **What I did instead:** Stripped raw paths and saved files to disk using unique generated UUIDs (`uuid.uuid4()`), keeping the original filename safely stored only as metadata in the database.
+- **Prompt:** "How should we include user permissions in the JWT payload to speed up authorization checks?"
+- **AI Output:** Suggested encoding a list of permitted document IDs directly inside the JWT access token.
+- **Flaw Detected:** Violates Requirement #3 ("Taking access away works immediately"). If permissions are embedded in a JWT, revoking access in the database does not prevent the user from using their unexpired token.
+- **Correction Applied:** Rejected permission caching in tokens. JWT maintains identity only; authorization runs live against the database on every download request.
 
-## Entry 5: Automated Security Testing with Pytest
-- **Date:** October 21, 2026
-- **Prompt:** "Write automated pytest test cases for FastAPI to verify that unauthorized users receive a 403 Forbidden response when trying to download documents."
-- **What it produced:** Basic test cases checking for general HTTP exceptions.
-- **What was wrong with it:** The tests didn't simulate missing or invalid authorization tokens correctly against protected endpoints.
-- **What I did instead:** Configured `TestClient` in `tests/test_security.py` to explicitly test both unauthenticated requests (401) and unauthorized cross-user download attempts (403).
+---
+
+### Entry 4: Audit Log Atomicity on Unauthorized Requests
+- **Date:** October 22, 2026
+- **Prompt:** "Add error handling and audit logging when access is denied."
+- **AI Output:** Placed `record_audit_log()` after raising `HTTPException(status_code=403)`.
+- **Flaw Detected:** Raising `HTTPException` terminates execution immediately; code placed after the raise statement is never reached, resulting in silent failures where denied access attempts were never recorded.
+- **Correction Applied:** Reordered logic to commit the `DENIED` audit log entry to the database *before* raising the `403` exception.
+
+---
+
+### Entry 5: Automated Security Test Suite Alignment
+- **Date:** October 23, 2026
+- **Prompt:** "Generate pytest security test cases proving that unauthorized viewers cannot access documents."
+- **AI Output:** Wrote tests requesting authentication against `/token`, while the application routing had renamed the path to `/auth/login`, causing a 404 test failure.
+- **Flaw Detected:** Route mismatch broke automated compliance testing.
+- **Correction Applied:** Added an endpoint alias `@app.post("/token")` in `app/main.py` to ensure seamless OAuth2 and pytest test client compatibility.
