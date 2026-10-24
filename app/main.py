@@ -59,9 +59,6 @@ class AuditLogResponse(BaseModel):
         from_attributes = True
 
 
-# Initialize database tables
-Base.metadata.create_all(bind=engine)
-
 app = FastAPI(
     title="TrustVault API",
     description="Secure document sharing platform with strict server-side authorization and audit trail.",
@@ -92,20 +89,25 @@ def serve_frontend():
     return {"message": "TrustVault API is running. Check /docs"}
 
 
-# ---------------- Seed Initial Users ----------------
+# ---------------- Seed Initial Users & Tables on Startup ----------------
 @app.on_event("startup")
 def startup_event():
+    # Ensure tables are created when app boots up
+    Base.metadata.create_all(bind=engine)
+    
     db: Session = next(get_db())
-    admin = db.query(User).filter(User.email == "admin@trustvault.com").first()
-    if not admin:
-        users = [
-            User(id=str(uuid.uuid4()), email="admin@trustvault.com", hashed_password=get_password_hash("AdminPass123!"), role="Administrator"),
-            User(id=str(uuid.uuid4()), email="owner@trustvault.com", hashed_password=get_password_hash("OwnerPass123!"), role="Owner"),
-            User(id=str(uuid.uuid4()), email="viewer@trustvault.com", hashed_password=get_password_hash("ViewerPass123!"), role="Viewer"),
-        ]
-        db.add_all(users)
-        db.commit()
-    db.close()
+    try:
+        admin = db.query(User).filter(User.email == "admin@trustvault.com").first()
+        if not admin:
+            users = [
+                User(id=str(uuid.uuid4()), email="admin@trustvault.com", hashed_password=get_password_hash("AdminPass123!"), role="Administrator"),
+                User(id=str(uuid.uuid4()), email="owner@trustvault.com", hashed_password=get_password_hash("OwnerPass123!"), role="Owner"),
+                User(id=str(uuid.uuid4()), email="viewer@trustvault.com", hashed_password=get_password_hash("ViewerPass123!"), role="Viewer"),
+            ]
+            db.add_all(users)
+            db.commit()
+    finally:
+        db.close()
 
 
 # ---------------- Auth Dependency ----------------
