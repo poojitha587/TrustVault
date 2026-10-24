@@ -46,10 +46,16 @@ def decode_access_token(token: str) -> Optional[dict]:
 
 
 def authorize_document_access(db: Session, user: User, document: Document, action: str = "READ") -> bool:
-    if user.role == "Administrator":
+    # Viewer రోల్ ఉన్నవారికి ఎట్టి పరిస్థితుల్లోనూ ఆటోమేటిక్ యాక్సెస్ ఇవ్వకూడదు
+    if user.role == "Viewer":
+        # కేవలం Explicit గా పర్మిషన్ ఇస్తేనే అనుమతించాలి (కింద ఉన్న DB చెక్ ద్వారా)
+        pass
+    elif user.role == "Administrator":
         return True
-    if document.owner_id == user.id:
+    elif document.owner_id == user.id:
         return True
+
+    # డేటాబేస్‌లో పర్మిషన్ ఉందా లేదా అని చెక్ చేస్తుంది
     permission = (
         db.query(DocumentPermission)
         .filter(
